@@ -48,7 +48,7 @@ func SyncConsumer(ctx context.Context, conf map[string]string, redisClient *redi
 func AsyncConsumer(ctx context.Context, conf map[string]string, redisClient *redis.Client, consumerChanel chan<- Response, ackChanel <-chan string) {
 	cosumerConf := extractConf(conf)
 	go consumeEvents(ctx, redisClient, cosumerConf, consumerChanel)
-	go ack(ctx, redisClient, cosumerConf, ackChanel)
+	go asyncack(ctx, redisClient, cosumerConf, ackChanel)
 }
 
 func SyncConsumerWithConsumerConf(ctx context.Context, cosumerConf ConsumerConf, redisClient *redis.Client, handleNewEvent func(string, map[string]interface{}) error, createGroup bool) {
@@ -78,7 +78,7 @@ func SyncConsumerWithConsumerConf(ctx context.Context, cosumerConf ConsumerConf,
 			if err != nil {
 				log.Printf("Not able to process the message %s. Error while processing the message %s", values, err)
 			} else {
-				redisClient.XAck(ctx, cosumerConf.StreamName, cosumerConf.ConsumerGroup, messageID)
+				redisClient.XAck(ctx, cosumerConf.StreamName, cosumerConf.ConsumerGroup, messageID).Result()
 			}
 		}
 	}
@@ -86,7 +86,7 @@ func SyncConsumerWithConsumerConf(ctx context.Context, cosumerConf ConsumerConf,
 
 func AsyncConsumerWithConsumerConf(ctx context.Context, conf ConsumerConf, redisClient *redis.Client, consumerChanel chan<- Response, ackChanel <-chan string) {
 	go consumeEvents(ctx, redisClient, conf, consumerChanel)
-	go ack(ctx, redisClient, conf, ackChanel)
+	go asyncack(ctx, redisClient, conf, ackChanel)
 }
 
 func CreateConsumerGroup(ctx context.Context, conf map[string]string, redisClient *redis.Client) {
@@ -99,7 +99,7 @@ func CreateConsumerGroup(ctx context.Context, conf map[string]string, redisClien
 	}
 }
 
-func pendingList(ctx context.Context,
+func ReadPEL(ctx context.Context,
 	conf ConsumerConf, redisClient *redis.Client) ([]redis.XPendingExt, error) {
 	return redisClient.XPendingExt(ctx, &redis.XPendingExtArgs{
 		Stream:   conf.StreamName,
@@ -116,8 +116,6 @@ func PublishEvent(ctx context.Context, conf map[string]string, client *redis.Cli
 	var id = conf[ID]
 	maxLen, _ := strconv.Atoi(conf[MaxLen])
 	limit, _ := strconv.Atoi(conf[Limit])
-	log.Println("Publishing to  stream " + stream)
-
 	var err = client.XAdd(ctx, &redis.XAddArgs{
 		Stream:     stream,
 		NoMkStream: true,
@@ -130,7 +128,7 @@ func PublishEvent(ctx context.Context, conf map[string]string, client *redis.Cli
 	}).Err()
 	return err
 }
-func ack(ctx context.Context, redisClient *redis.Client, cosumerConf ConsumerConf, ackChanel <-chan string) {
+func asyncack(ctx context.Context, redisClient *redis.Client, cosumerConf ConsumerConf, ackChanel <-chan string) {
 	for {
 		redisClient.XAck(ctx, cosumerConf.StreamName, cosumerConf.ConsumerGroup, <-ackChanel)
 	}
